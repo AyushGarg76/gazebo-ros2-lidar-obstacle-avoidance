@@ -1,3 +1,0 @@
-/home/ayush/robotics_ws/src/lidar_controller/build/CMakeFiles/lidar_node.dir
-/home/ayush/robotics_ws/src/lidar_controller/build/CMakeFiles/edit_cache.dir
-/home/ayush/robotics_ws/src/lidar_controller/build/CMakeFiles/rebuild_cache.dir
