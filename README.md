@@ -1,233 +1,254 @@
-# Gazebo Fortress + ROS 2 LiDAR Obstacle Avoidance
+## Experimental SLAM and Nav2 Navigation
 
-A differential-drive robot simulation built with **Gazebo Fortress** and **ROS 2 Humble**.
+In addition to reactive LiDAR obstacle avoidance, the project has been extended with an experimental mapping, localization, and navigation workflow using ROS 2 Humble, Gazebo Fortress, SLAM Toolbox, and Nav2.
 
-The robot uses a simulated 360° LiDAR sensor and a ROS 2 C++ controller to detect nearby obstacles, stop forward motion, and turn toward the side with more open space.
+**Status: Navigation is still under development.** A global path was observed in RViz after sending a 2D Nav Goal, but reliable end-to-end navigation has not yet been verified.
 
-> This project demonstrates reactive obstacle avoidance. It does not currently implement SLAM or global path planning.
+### Implemented and Tested Components
 
-## Features
+- Simulated LiDAR data bridged to ROS 2 on `/lidar`.
+- Simulated odometry available on `/model/my_robot/odometry`.
+- A saved occupancy-grid map at `maps/obstacle_world.pgm`, with metadata in `maps/obstacle_world.yaml`.
+- SLAM Toolbox used to generate a map during mapping experiments.
+- Nav2 Map Server configured to load the saved map.
+- AMCL configured for localization using the saved map and LiDAR data.
+- Nav2 planner and controller servers launched with a custom parameter file.
+- RViz used to visualize the map and set navigation goals.
+- A global path observed after sending a 2D Nav Goal.
 
-- Custom differential-drive robot and obstacle arena defined in SDF.
-- Simulated 360° GPU LiDAR publishing on `/lidar`.
-- ROS 2 C++ controller using `sensor_msgs/msg/LaserScan`.
-- Velocity commands published through `geometry_msgs/msg/Twist`.
-- Forward obstacle detection within ±30°.
-- Stop/resume hysteresis using 1.0 m and 1.2 m thresholds.
-- Reactive turning toward the side with the greater average measured range.
-- Watchdog that publishes zero velocity if LiDAR data has not arrived or becomes stale.
-- Launch file that starts Gazebo, ROS-Gazebo bridges, and the controller.
+These results demonstrate progress toward navigation, but they do not yet establish reliable autonomous goal execution.
 
-## Architecture
+### Navigation Architecture
 
-```text
-Gazebo Fortress
-(lidar_world.sdf)
-       |
-       | LiDAR scan
-       v
-  ros_gz_bridge
-       |
-       | /lidar
-       v
-lidar_avoidance_node
-     (ROS 2 C++)
-       |
-       | /cmd_vel
-       v
-  ros_gz_bridge
-       |
-       v
-Gazebo differential-drive system
-       |
-       v
-    Robot motion
-```
-
-## Technology Stack
-
-- Ubuntu 22.04
-- ROS 2 Humble
-- Gazebo Fortress
-- C++17
-- `rclcpp`
-- `sensor_msgs`
-- `geometry_msgs`
-- `ros_gz_sim`
-- `ros_gz_bridge`
-- SDF
-
-## Repository Structure
+The intended navigation pipeline is:
 
 ```text
-robotics_ws/
-├── src/
-│   ├── lidar_world.sdf
-│   ├── lidar_avoidance_ros/
-│   │   ├── CMakeLists.txt
-│   │   ├── package.xml
-│   │   ├── launch/
-│   │   │   └── lidar_avoidance.launch.py
-│   │   └── src/
-│   │       └── lidar_avoidance_node.cpp
-│   └── lidar_controller/
-│       ├── CMakeLists.txt
-│       └── lidar_node.cpp
-└── .gitignore
+Saved Occupancy Grid Map
+          |
+          v
+      Map Server
+          |
+          v
+         /map
+          |
+          v
+   AMCL Localization <----- LiDAR (/lidar)
+          |
+          v
+       TF: map
+          |
+          v
+   Planner Server
+          |
+          v
+      Global Plan
+          |
+          v
+  Controller Server
+          |
+          v
+     /cmd_vel_nav
+          |
+          v
+   Velocity Smoother
+          |
+          v
+       /cmd_vel
+          |
+          v
+    Gazebo Command Bridge
+          |
+          v
+     Robot Motion
 ```
 
-The `lidar_avoidance_ros` package contains the ROS 2 controller and launch file used in the main workflow.
+The robot's odometry is provided through `/model/my_robot/odometry`, using the frames `my_robot/odom` and `my_robot/chassis`.
 
-The `lidar_controller` directory contains a separate standalone Gazebo Transport C++ controller example.
+### Coordinate Frames
 
-## How It Works
+The following frame configuration was used during the experiment:
 
-1. The simulated LiDAR publishes scans on `/lidar`.
-2. `ros_gz_bridge` forwards the scans to ROS 2.
-3. The C++ node examines the forward sector between -30° and +30°.
-4. If the minimum valid range falls below 1.0 m, the controller enters obstacle-avoidance mode.
-5. It compares average measured ranges in the left and right sectors.
-6. The robot stops moving forward and turns toward the side with the greater average range.
-7. Forward movement resumes when the minimum forward range exceeds 1.2 m.
-8. If scans are unavailable or become stale, the watchdog publishes a zero-velocity command.
+| Frame | Purpose |
+|---|---|
+| `map` | Global map reference frame |
+| `my_robot/odom` | Local odometry frame |
+| `my_robot/chassis` | Robot base frame |
+| `my_robot/chassis/lidar` | LiDAR sensor frame |
 
-### Controller Parameters
-
-| Parameter | Value | Purpose |
-|---|---:|---|
-| Stop distance | 1.0 m | Enter obstacle-avoidance mode |
-| Resume distance | 1.2 m | Resume forward movement |
-| Forward velocity command | 0.4 m/s | Move forward when the path is clear |
-| Angular velocity command | 0.5 rad/s | Turn while avoiding obstacles |
-| Scan timeout | 1.0 s | Detect stale LiDAR data |
-| Watchdog interval | 500 ms | Check scan availability |
-
-The separate stop and resume thresholds provide hysteresis, reducing rapid switching when an obstacle is near the stopping threshold.
-
-These are commanded velocities and distances; actual simulated motion depends on the robot model and physics.
-
-## Prerequisites
-
-The project was developed for:
-
-- Ubuntu 22.04
-- ROS 2 Humble
-- Gazebo Fortress
-- `ros_gz_sim`
-- `ros_gz_bridge`
-- `colcon` and the ROS 2 C++ build toolchain
-
-Source ROS 2 in your terminal:
-
-```bash
-source /opt/ros/humble/setup.bash
-```
-
-Make sure Gazebo Fortress and the ROS-Gazebo integration packages are installed and working before launching the simulation.
-
-## Build and Run
-
-### 1. Clone the Repository
-
-The repository contains the project files under `src/`. To recreate the workspace layout expected by the current launch file:
-
-```bash
-mkdir -p ~/robotics_ws/src
-cd ~/robotics_ws/src
-
-git clone https://github.com/AyushGarg76/gazebo-ros2-lidar-obstacle-avoidance.git project_checkout
-```
-
-Move the cloned project files into the workspace's `src/` directory, or use an equivalent directory layout that places the ROS package at:
+The expected transform chain is:
 
 ```text
-~/robotics_ws/src/lidar_avoidance_ros
+map
+ |
+ v
+my_robot/odom
+ |
+ v
+my_robot/chassis
+ |
+ v
+my_robot/chassis/lidar
 ```
 
-The world file should be located at:
+AMCL is responsible for publishing the `map` to odometry transform, while the simulation provides the odometry transform and the static LiDAR transform.
+
+### Configuration Fixes
+
+The following issues were encountered and corrected during Nav2 setup:
+
+**1. Planner plugin identifier**
+
+The initial planner configuration used:
+
+```yaml
+plugin: "nav2_navfn_planner::NavfnPlanner"
+```
+
+This caused a plugin-loading error in the tested ROS 2 Humble installation. The configuration that loaded successfully was:
+
+```yaml
+plugin: "nav2_navfn_planner/NavfnPlanner"
+```
+
+**2. Costmap parameter types**
+
+The controller server initially crashed because the costmap `height` parameter was provided as an integer while the node expected a floating-point value.
+
+Use floating-point values for dimensions when required by the declared parameter types:
+
+```yaml
+width: 4.0
+height: 4.0
+resolution: 0.05
+```
+
+**3. Simulation time**
+
+The simulation publishes `/clock`. Nav2 nodes must use simulation time when running against this clock:
+
+```yaml
+use_sim_time: true
+```
+
+**4. Robot frame names**
+
+The robot does not use the default `base_link` frame in this experiment. The configured base frame is:
+
+```yaml
+robot_base_frame: my_robot/chassis
+```
+
+The odometry frame is:
+
+```yaml
+odom_frame_id: my_robot/odom
+```
+
+Keep frame names consistent across AMCL, the costmaps, the behavior server, the controller, and RViz.
+
+### Experimental Map Files
+
+The saved map consists of two files:
 
 ```text
-~/robotics_ws/src/lidar_world.sdf
+maps/
+├── obstacle_world.pgm
+└── obstacle_world.yaml
 ```
 
-**Note:** The current launch file uses an absolute path to the world file. If your workspace is in a different location, update that path in the launch file.
+The YAML file references the image and defines map resolution, origin, and occupancy thresholds.
 
-### 2. Build the ROS 2 Package
+Example metadata:
 
-From the workspace root:
-
-```bash
-cd ~/robotics_ws
-
-source /opt/ros/humble/setup.bash
-
-colcon build --packages-select lidar_avoidance_ros
-
-source install/setup.bash
+```yaml
+image: obstacle_world.pgm
+mode: trinary
+resolution: 0.05
+origin: [-1.95, -2.37, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25
 ```
 
-### 3. Launch the Simulation
+The saved map was successfully loaded through Nav2 Map Server and was visible in RViz.
 
-```bash
-ros2 launch lidar_avoidance_ros lidar_avoidance.launch.py
-```
+### Nav2 Launch
 
-The launch file starts:
-
-- Gazebo Fortress with `lidar_world.sdf`
-- The LiDAR bridge from Gazebo to ROS 2
-- The velocity-command bridge from ROS 2 to Gazebo
-- The `lidar_avoidance_node` C++ controller
-
-## Useful ROS 2 Commands
-
-In another terminal:
+The navigation servers were started using the custom parameter file:
 
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/robotics_ws/install/setup.bash
+
+ros2 launch nav2_bringup navigation_launch.py \
+  use_sim_time:=True \
+  params_file:=/home/ayush/robotics_ws/config/nav2_params.yaml
 ```
 
-List active topics:
+This command assumes that the simulation, ROS-Gazebo bridges, map server, AMCL, and RViz have been started separately.
+
+The parameter file must exist at the specified path. Update it if the workspace is located elsewhere.
+
+### Useful Navigation Diagnostics
+
+Check the navigation lifecycle states:
 
 ```bash
-ros2 topic list
+ros2 lifecycle get /controller_server
+ros2 lifecycle get /planner_server
+ros2 lifecycle get /behavior_server
+ros2 lifecycle get /bt_navigator
+ros2 lifecycle get /velocity_smoother
 ```
 
-Inspect LiDAR scans:
+Check the navigation action and global plan:
 
 ```bash
-ros2 topic echo /lidar
+ros2 action info /navigate_to_pose
+ros2 topic echo /plan --once
 ```
 
-Inspect velocity commands:
+Check odometry and localization:
 
 ```bash
+ros2 topic hz /model/my_robot/odometry
+ros2 topic echo /amcl_pose --once
+```
+
+Inspect the velocity command pipeline while a goal is actively executing:
+
+```bash
+ros2 topic echo /cmd_vel_nav
 ros2 topic echo /cmd_vel
 ```
 
-List running nodes:
+Check the transforms:
 
 ```bash
-ros2 node list
+ros2 run tf2_ros tf2_echo map my_robot/odom
+ros2 run tf2_ros tf2_echo my_robot/odom my_robot/chassis
 ```
 
-## Limitations and Future Improvements
+Run commands in separate terminals when necessary. Compare the controller output, velocity smoother output, Gazebo command bridge, and odometry during the same navigation attempt.
 
-- The controller is reactive and does not build a map or plan a global route.
-- Average range is a simple heuristic and may not always identify the safest path.
-- The watchdog handles missing or stale scan data but does not make this a safety-certified controller.
-- The world-file path in the launch file should be made configurable.
-- The current implementation has not been presented as a physical-robot deployment.
+### Known Issues
 
-Potential next steps:
+The Nav2 experiment still requires further debugging:
 
-- Make the launch file portable by removing the hard-coded world path.
-- Add odometry and TF visualization.
-- Visualize LiDAR scans in RViz.
-- Integrate SLAM Toolbox for mapping.
-- Explore Nav2 for localization and navigation.
+- A global path can appear in RViz without the robot reliably following it.
+- `/cmd_vel_nav` has produced brief angular velocity commands followed by zero commands.
+- `/cmd_vel` has shown zero commands during some observations.
+- Intermittent TF timestamp and connectivity warnings were observed.
+- Costmap warnings indicated that the robot or sensor origin was outside the costmap bounds during startup.
+- The ROS command bridge is subscribed to `/cmd_vel`, but command delivery to the Gazebo drive system during an active Nav2 goal has not been conclusively verified.
 
-## License
+These observations have not yet established a single root cause.
 
-The ROS 2 package declares Apache-2.0 in its `package.xml`. Add a repository-level `LICENSE` file if you intend to distribute the full repository under that license.
+### Next Steps
+
+1. Verify the TF tree during a fresh simulation run.
+2. Verify that the map, global costmap, and local costmap are correctly aligned.
+3. Trace a non-zero velocity command from the Nav2 controller through the velocity smoother and Gazebo bridge.
+4. Confirm that odometry changes while a navigation goal is being executed.
+5. Test navigation to multiple reachable goals in the simulated world.
+6. Document a successful end-to-end navigation run once it is repeatable.
